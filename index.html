@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>My first three.js app</title>
+    <style>
+        body { margin: 0; }
+        canvas { width: 100%; height: 100% }
+    </style>
+</head>
+<body>
+<script src="js/three.js"></script>
+<script src="js/OrbitControls.js"></script>
+<script src="js/Tween.js"></script>
+<script>
+    // define cabinet and components
+   class Board {
+       constructor(length, width, height) {
+           this.length = length;
+           this.width = width;
+           this.height = height;
+           this.position = { x: 2, y: 3, z: 4 };
+       }
+   }
+
+   class Cabinet {
+       constructor(length, width, height, strength, door) {
+           // cabinet position
+           this.position = { x: 0, y: 0, z: 0 };
+
+           this.closed = door;
+
+           // cabinet dimensions
+           this.length = length;
+           this.width = width;
+           this.height = height;
+           this.strength = strength;
+
+           // cabinet boards
+           this.front = (door)? new Board(length, strength, height) : null;
+           this.back = new Board(length, strength, height - 2*strength);
+           this.left = new Board(strength, width - strength, height - 2*strength);
+           this.right = new Board(strength, width - strength, height - 2*strength);
+           this.top = new Board(length, width, strength);
+           this.bottom = new Board(length, width, strength);
+           this.horizontal = new Board(length - 2*strength, width - strength, strength);
+           this.verticalTop = new Board(strength, width - strength, (height - 2*strength) / 2 - strength/2);
+           this.verticalBottom = new Board(strength, width - strength, (height - 2*strength) / 2 - strength/2);
+
+           // position boards
+           if (this.front != null) {
+               this.front.position.x = this.position.x;
+               this.front.position.y = this.position.y;
+               this.front.position.z = this.position.z + 0.5*this.width;
+           }
+           this.back.position.x = this.position.x;
+           this.back.position.y = this.position.y;
+           this.back.position.z = this.position.z - 0.5*this.width;
+
+           this.left.position.x = (this.position.x - 0.5*this.length) + 0.5*this.strength;
+           this.left.position.y = this.position.y;
+           this.left.position.z = this.position.z;
+
+           this.right.position.x = (this.position.x + 0.5*this.length) - 0.5*this.strength;
+           this.right.position.y = this.position.y;
+           this.right.position.z = this.position.z;
+
+           this.top.position.x = this.position.x;
+           this.top.position.y = this.position.y + 0.5*this.height - 0.5*this.strength;
+           this.top.position.z = this.position.z - 0.5*this.strength;
+
+           this.bottom.position.x = this.position.x;
+           this.bottom.position.y = this.position.y - 0.5*this.height + 0.5*this.strength;
+           this.bottom.position.z = this.position.z - 0.5*this.strength;
+
+           this.horizontal.position.x = this.position.x;
+           this.horizontal.position.y = this.position.y;
+           this.horizontal.position.z = this.position.z;
+
+           this.verticalTop.position.x = this.position.x;
+           this.verticalTop.position.y = this.position.y + 0.25*(this.height - 2*this.strength);
+           this.verticalTop.position.z = this.position.z;
+
+           this.verticalBottom.position.x = this.position.x;
+           this.verticalBottom.position.y = this.position.y - 0.25*(this.height - 2*this.strength);
+           this.verticalBottom.position.z = this.position.z;
+       }
+
+       getBoards() {
+            return [this.front, this.back, this.left, this.right, this.top, this.bottom, this.horizontal,
+            this.verticalTop, this.verticalBottom];
+       }
+   }
+
+
+
+    // maintain all board meshes in the scene
+    var allBoards = [];
+
+
+   // raycaster stuff
+    var raycaster = new THREE.Raycaster();
+    var mouse = new THREE.Vector2();
+    window.addEventListener( 'click', onMouseClick, false );
+
+    // tween animation
+    var tweenPos = {x: 0, y: 0};
+    var tweenTarget = {x: 0, y: 0};
+    var tween = null;
+
+    // setting up scene and camera
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+    var renderer = new THREE.WebGLRenderer();
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    document.body.appendChild( renderer.domElement );
+
+
+
+    // loading textures
+    var texConcrete = new THREE.TextureLoader().load( "./textures/tex_concrete.png" );
+    var texWood = new THREE.TextureLoader().load( "./textures/tex_wood.png" );
+
+    // creating materials
+    /*var cubeMats =
+        [
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')}),
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')}),
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')}),
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')}),
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')}),
+            new THREE.MeshLambertMaterial({map: THREE.TextureLoader().load('/textures/tex_concrete.png')})
+        ];*/
+
+    // setting up camera controls
+    var controls = new THREE.OrbitControls(camera, renderer.domElement);
+    camera.position.set( 0, 0, 2 );
+    controls.update();
+
+    // setting up lighting (1 ambient light and 1 point light)
+    var ambLight1 = new THREE.AmbientLight( 0x606060 );
+    var pointLight1 = new THREE.PointLight( 0xF08050, 1, 100, );
+    pointLight1.position.set( 3, 3, 3 );
+    scene.add( ambLight1 );
+    scene.add( pointLight1 );
+
+    // creating the room using a cube with double sided material
+    var roomheight = 3.0;
+    var roomgeometry = new THREE.BoxGeometry( 10, roomheight, 10 );
+    var cubeMats = new THREE.MeshPhongMaterial( { map: texConcrete, side: THREE.DoubleSide } );
+    var room = new THREE.Mesh( roomgeometry, cubeMats );
+    room.position.y += 0.25*roomheight;
+    scene.add( room );
+
+    // create cabinet
+    var theCabinet = new Cabinet(1.8, 0.8, 1.8, 0.01, true);
+    boards2scene(theCabinet.getBoards());
+
+    // test board
+    /*let board1 = new Board( 1, 0.5, 0.01);
+    console.log("length: " + board1.length);
+    console.log("width: " + board1.width);
+    console.log("height: " + board1.height);
+    console.log("x: " + board1.position.x);
+    console.log("y: " + board1.position.y);
+    console.log("z: " + board1.position.z);
+    boards2scene([board1]);*/
+
+    // render stuff
+    function animate() {
+        update();
+        requestAnimationFrame( animate );
+        controls.update();
+        renderer.render( scene, camera );
+    }
+    animate();
+
+    // helper functions
+    function boards2scene(boards) {
+        for (var i=0; i<boards.length; i++) {
+            if (boards[i] == null) continue;
+            var aboardgeo = new THREE.BoxGeometry(boards[i].length, boards[i].height, boards[i].width);
+            var amaterial = new THREE.MeshLambertMaterial({map: texWood});
+            var amesh = new THREE.Mesh( aboardgeo, amaterial );
+            amesh.position.x = boards[i].position.x;
+            amesh.position.y = boards[i].position.y;
+            amesh.position.z = boards[i].position.z;
+            allBoards.push( amesh );
+            scene.add( amesh );
+        }
+    }
+
+    function onMouseClick( event ) {
+
+        // calculate mouse position in normalized device coordinates
+        // (-1 to +1) for both components
+
+        mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+        mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+        // update the picking ray with the camera and mouse position
+        raycaster.setFromCamera( mouse, camera );
+
+        // calculate objects intersecting the picking ray
+        var intersects = raycaster.intersectObjects( scene.children );
+
+        for ( var i = 0; i < intersects.length; i++ ) {
+
+            //intersects[ i ].object.material.color.set( 0xff0000 );
+            if (intersects[i].object == allBoards[0]) {
+                toggleDoor();
+            }
+        }
+    }
+
+    function toggleDoor() {
+        if(theCabinet.closed){
+            tweenPos.x = allBoards[0].position.x;
+            tweenPos.y = allBoards[0].position.y;
+            tweenTarget.x = allBoards[0].position.x;
+            tweenTarget.y = allBoards[0].position.y + theCabinet.height;
+            tween = new TWEEN.Tween(tweenPos).to(tweenTarget, 2000);
+            tween.onUpdate(function(){
+                if (allBoards[0] != null && tween != null) {
+                    allBoards[0].position.y = tweenPos.y;
+                    console.log("door y: " + allBoards[0].position.y + " tweenPos: " + tweenPos.y);
+                }
+            });
+            tween.onComplete(function(){
+                theCabinet.closed = !theCabinet.closed;
+                tween.stop();
+                tween = null;
+                console.log("tween complete");
+            })
+            tween.start();
+            console.log("tweening started, current: " + tweenPos.y + " target: " + tweenTarget.y);
+        }
+        else{
+            tweenPos.x = allBoards[0].position.x;
+            tweenPos.y = allBoards[0].position.y;
+            tweenTarget.x = allBoards[0].position.x;
+            tweenTarget.y = allBoards[0].position.y - theCabinet.height;
+            tween = new TWEEN.Tween(tweenPos).to(tweenTarget, 2000);
+            tween.onUpdate(function(){
+                if (allBoards[0] != null && tween != null) {
+                    allBoards[0].position.y = tweenPos.y;
+                    console.log("door y: " + allBoards[0].position.y + " tweenPos: " + tweenPos.y);
+                }
+            });
+            tween.onComplete(function(){
+                theCabinet.closed = !theCabinet.closed;
+                tween.stop();
+                tween = null;
+                console.log("tween complete");
+            })
+            tween.start();
+            console.log("tweening started, current: " + tweenPos.y + " target: " + tweenTarget.y);
+        }
+    }
+
+    function update() {
+        if (tween != null) tween.update();
+    }
+</script>
+</body>
+</html>
